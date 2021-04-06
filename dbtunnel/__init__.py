@@ -1,8 +1,8 @@
 import os
 import select
 import socket
-import SocketServer
-import thread
+import socketserver
+import _thread
 
 from django.conf import settings
 from django.db import connections
@@ -19,15 +19,15 @@ in addition to specifying the host, username, and identityfile
 SSH_CLIENT_KEY = '__DATABASE_SSH_CLIENT'
 SSH_TUNNEL_KEY = '__DATABASE_SSH_TUNNEL'
 
-class __PortForwardingServer(SocketServer.ThreadingTCPServer):
+class __PortForwardingServer(socketserver.ThreadingTCPServer):
 	daemon_threads = True
 	allow_reuse_address = True
 
-class __PortForwardingServerHandler(SocketServer.BaseRequestHandler):
+class __PortForwardingServerHandler(socketserver.BaseRequestHandler):
 	def handle(self):
 		try:
 			chan = self.ssh_transport.open_channel('direct-tcpip', (self.chain_host, self.chain_port), self.request.getpeername())
-		except Exception, e:
+		except Exception as e:
 			#print 'Incoming request to %s:%d failed: %s' % (self.chain_host, self.chain_port, repr(e))
 			return
 		if chan is None:
@@ -58,24 +58,24 @@ def start_tunnel(database, use_ssh_config=False):
 		return
 	from paramiko import AutoAddPolicy, SSHClient, SSHConfig
 	db = settings.DATABASES[database]
-	if db.has_key(SSH_CLIENT_KEY):
+	if "SSH_CLIENT_KEY" in db:
 		# Tunnel is already running
 		return
-	if not db.has_key('REMOTE_HOST'):
+	if "REMOTE_HOST" not in db:
 		raise ValueError('REMOTE_HOST not specified for ' + database)
-	if not db.has_key('TUNNEL_HOST'):
+	if "TUNNEL_HOST" not in db:
 		raise ValueError('TUNNEL_HOST not specified for ' + database)
 	kwargs = {}
 	hostname = db['TUNNEL_HOST']
 	
 	# Setup the kwargs
-	if db.has_key('TUNNEL_USER'):
+	if 'TUNNEL_USER' in db:
 		kwargs['username'] = db['TUNNEL_USER']
-	if db.has_key('TUNNEL_PASSWORD'):
+	if 'TUNNEL_PASSWORD' in db:
 		kwargs['password'] = db['TUNNEL_PASSWORD']
-	if db.has_key('TUNNEL_IDENTITY'):
+	if 'TUNNEL_IDENTITY' in db:
 		kwargs['key_filename'] = db['TUNNEL_IDENTITY']
-	if db.has_key('TUNNEL_PORT'):
+	if 'TUNNEL_PORT' in db:
 		kwargs['port'] = int(db['TUNNEL_PORT'])
 	if use_ssh_config:
 		try:
@@ -85,13 +85,13 @@ def start_tunnel(database, use_ssh_config=False):
 				config = sshConfig.lookup(db['TUNNEL_HOST'])
 				hostname = config['hostname']
 				# Use username and port if missing
-				if not kwargs.has_key('username') and config.has_key('user'):
+				if 'username' not in kwargs and 'user' in config:
 					kwargs['username'] = config['user']
-				if not kwargs.has_key('port') and config.has_key('port'):
+				if 'port' not in kwargs and 'port' in config:
 					kwargs['port'] = int(config['port'])
 				# Add identityfile (a list)
-				if config.has_key('identityfile'):
-					if kwargs.has_key('key_filename'):
+				if 'identityfile' in config:
+					if 'key_filename' in kwargs:
 						if type(kwargs['key_filename']) is list:
 							kwargs['key_filename'] += config['identityfile']
 						else:
@@ -102,7 +102,7 @@ def start_tunnel(database, use_ssh_config=False):
 			pass
 
 	# Fix the identity files
-	if kwargs.has_key('key_filename'):
+	if 'key_filename' in kwargs:
 		if type(kwargs['key_filename']) is list:
 			for i in range(len(kwargs['key_filename'])):
 				if kwargs['key_filename'][i].startswith('~'):
@@ -126,7 +126,7 @@ def start_tunnel(database, use_ssh_config=False):
 	db[SSH_TUNNEL_KEY] = server
 	db[SSH_CLIENT_KEY] = client
 	# Start port forwarding server on another thread
-	thread.start_new_thread(__start_tunnel, (server,))
+	_thread.start_new_thread(__start_tunnel, (server,))
 
 def stop_tunnel(database):
 	if not database:
@@ -138,11 +138,11 @@ def stop_tunnel(database):
 		pass
 	db = settings.DATABASES[database]
 	# Stop the server
-	if db.has_key(SSH_TUNNEL_KEY):
+	if SSH_TUNNEL_KEY in db:
 		db[SSH_TUNNEL_KEY].shutdown()
 		del db[SSH_TUNNEL_KEY]
 	# Stop the client
-	if db.has_key(SSH_CLIENT_KEY):
+	if SSH_CLIENT_KEY in db:
 		db[SSH_CLIENT_KEY].close()
 		del db[SSH_CLIENT_KEY]
 
@@ -161,3 +161,4 @@ class database_tunnel(object):
 		start_tunnel(self.__database, self.__use_ssh_config)
 	def __exit__(self, *_):
 		stop_tunnel(self.__database)
+
